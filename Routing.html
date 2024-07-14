@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Route from Source to Destination with Weather Updates</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(to right, #ece9e6, #ffffff);
+        }
+
+        #map {
+            height: 60%;
+            width: 80%;
+            margin: 5% auto;
+            border-radius: 15px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease-in-out;
+        }
+
+        #map:hover {
+            transform: scale(1.02); /* Scale up on hover */
+        }
+
+        #info, #text {
+            width: 80%;
+            margin: 2% auto;
+            padding: 2%;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            font-size: 1.2em;
+            color: #333;
+            transition: transform 0.3s ease-in-out;
+        }
+
+        #info:hover, #text:hover {
+            transform: translateY(-5px); /* Move up on hover */
+        }
+
+        #info p, #text p, #info ul {
+            margin: 10px 0;
+        }
+
+        #info ul {
+            padding: 0;
+            list-style-type: none;
+        }
+
+        #info ul li {
+            margin: 5px 0;
+        }
+
+        #text p strong {
+            display: inline-block;
+            width: 200px;
+        }
+
+        #info strong {
+            color: #007BFF;
+        }
+
+        #weatherRecommendation {
+            font-weight: bold;
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body>
+    <div id="map"></div>
+     <div id="text">
+        <p><strong style="color:red;">Red - Non-optimal route</strong></p>
+        <p><strong style="color:blue;">Blue - Optimal route</strong></p>
+    </div>
+    <div id="info">
+        <p><strong>Source Coordinates:</strong> Latitude: <span id="sourceLat">12.2979</span>, Longitude: <span id="sourceLon">76.6393</span></p>
+        <p><strong>Destination Coordinates:</strong> Latitude: <span id="destLat">12.900160</span>, Longitude: <span id="destLon">77.466591</span></p>
+        <p><strong>Current Timestamp:</strong> <span id="timestamp"></span></p>
+        <p><strong>Estimated Travel Time:</strong> <span id="estimatedTime"></span></p>
+        <p><strong>Estimated Fuel Cost:</strong> <span id="fuelCost"></span></p>
+        <p><strong>Weather Information:</strong></p>
+        <ul>
+            <li><strong>Precipitation:</strong> <span id="precipitation"></span></li>
+            <li><strong>Humidity:</strong> <span id="humidity"></span></li>
+            <li><strong>Wind Speed:</strong> <span id="windSpeed"></span></li>
+            <li><strong>Temperature:</strong> <span id="temperature"></span></li>
+            <li><strong>Weather Recommendation:</strong> <span id="weatherRecommendation"></span></li>
+        </ul>
+        <div id="alternativeRoute">
+            <p><strong>Alternative Route Information:</strong></p>
+            <p id="alternativeRouteDetails"></p>
+        </div>
+    </div>
+
+    <script>
+        var map;
+        var routeLayer;
+        var alternativeRouteLayer;
+        var sourceLat = 15.33;
+        var sourceLon = 79.550;
+        var destinationLat = 18.25;
+        var destinationLon = 81.95;
+        var apiKey = "ALhcblxWNmGQomIQZ7fLuOR5zlrijEDl"; // Replace with your TomTom API key
+        var tomorrowApiKey = "KAT4rwgoApzjVWKOL6iB85QvpTBVuxZe"; // Replace with your Tomorrow.io API key
+        var truckSpeedKph = 40; // Average truck speed in km/h
+        var fuelEfficiency = 2.5; // km per liter for truck (adjust as needed)
+        var fuelCostPerLiter = 100; // cost in INR per liter
+
+        function initializeMap() {
+            map = L.map('map').setView([12.456244, 77.419884], 10); // Adjust zoom level if needed
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18,
+                attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            L.marker([sourceLat, sourceLon]).addTo(map)
+                .bindPopup("Source")
+                .openPopup();
+            L.marker([destinationLat, destinationLon]).addTo(map)
+                .bindPopup("Destination")
+                .openPopup();
+        }
+
+        function fetchWeatherData(latitude, longitude, destLat, destLon) {
+            // Fetch weather data from Tomorrow.io for current and destination location
+            fetch(`https://api.tomorrow.io/v4/timelines?location=${latitude},${longitude}&fields=precipitationProbability,temperature,humidity,windSpeed&apikey=${tomorrowApiKey}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Display weather information
+                    var currentPrecipitation = data.data.timelines[0].intervals[0].values.precipitationProbability;
+                    var currentTemperature = data.data.timelines[0].intervals[0].values.temperature;
+                    var currentHumidity = data.data.timelines[0].intervals[0].values.humidity;
+                    var currentWindSpeed = data.data.timelines[0].intervals[0].values.windSpeed;
+
+                    document.getElementById("precipitation").textContent = `${currentPrecipitation}%`;
+                    document.getElementById("temperature").textContent = `${currentTemperature}°C`;
+                    document.getElementById("humidity").textContent = `${currentHumidity}%`;
+                    document.getElementById("windSpeed").textContent = `${currentWindSpeed} m/s`;
+
+                    // Check weather conditions and provide recommendations
+                    var weatherRecommendation = document.getElementById("weatherRecommendation");
+                    if (currentPrecipitation > 10) {
+                        weatherRecommendation.textContent = "Consider delaying the trip due to high precipitation probability.";
+                        weatherRecommendation.style.color = "red";
+                        fetchAlternativeRoute(latitude, longitude, destLat, destLon);
+                    } else {
+                        weatherRecommendation.textContent = "Weather conditions are favorable for the trip.";
+                        weatherRecommendation.style.color = "green";
+                    }
+                })
+                .catch(error => console.error("Error fetching weather data:", error));
+        }
+
+        function fetchRoute(startLat, startLon, destLat, destLon) {
+            // Fetch route data using TomTom API
+            fetch(`https://api.tomtom.com/routing/1/calculateRoute/${startLat},${startLon}:${destLat},${destLon}/json?key=${apiKey}&routeType=fastest&traffic=true&vehicleCommercial=true`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.routes && data.routes.length > 0) {
+                        var route = data.routes[0].legs[0].points.map(point => [point.latitude, point.longitude]);
+                        var travelTime = data.routes[0].summary.travelTimeInSeconds; // Travel time in seconds
+                        var distance = data.routes[0].summary.lengthInMeters / 1000; // Distance in km
+                        var fuelCost = (distance / fuelEfficiency) * fuelCostPerLiter; // Estimated fuel cost
+
+                        // Adjust travel time for truck based on average speed
+                        var estimatedTimeHours = distance / truckSpeedKph;
+                        var hours = Math.floor(estimatedTimeHours);
+                        var minutes = Math.floor((estimatedTimeHours - hours) * 60);
+
+                        document.getElementById("estimatedTime").textContent = `${hours} hours and ${minutes} minutes`;
+                        document.getElementById("fuelCost").textContent = `₹${fuelCost.toFixed(2)}`;
+
+                        if (routeLayer) {
+                            map.removeLayer(routeLayer);
+                        }
+                        routeLayer = L.polyline(route, { color: 'red' }).addTo(map);
+                        map.fitBounds(routeLayer.getBounds());
+
+                        // Add marker for current location
+                        L.marker([startLat, startLon]).addTo(map)
+                            .bindPopup("Source Location")
+                            .openPopup();
+                    }
+                })
+                .catch(error => console.error("Error fetching route:", error));
+        }
+
+        function fetchAlternativeRoute(startLat, startLon, destLat, destLon) {
+            // Fetch alternative route using TomTom API
+            fetch(`https://api.tomtom.com/routing/1/calculateRoute/${startLat},${startLon}:${destLat},${destLon}/json?key=${apiKey}&routeType=shortest&traffic=true&vehicleCommercial=true&avoid=unpavedRoads&travelMode=truck`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.routes && data.routes.length > 0) {
+                        // Display the alternative route on the map
+                        var alternativeRoutePoints = data.routes[0].legs[0].points.map(point => [point.latitude, point.longitude]);
+
+                        if (alternativeRouteLayer) {
+                            map.removeLayer(alternativeRouteLayer);
+                        }
+                        alternativeRouteLayer = L.polyline(alternativeRoutePoints, { color: 'blue' }).addTo(map);
+
+                        // Update info panel with alternative route details
+                        var alternativeRouteInfo = document.getElementById("alternativeRouteDetails");
+                        var alternativeDistance = data.routes[0].summary.lengthInMeters / 1000;
+                        var alternativeTravelTime = data.routes[0].summary.travelTimeInSeconds;
+                        var alternativeHours = Math.floor(alternativeTravelTime / 3600);
+                        var alternativeMinutes = Math.floor((alternativeTravelTime % 3600) / 60);
+
+                        alternativeRouteInfo.innerHTML = `<p><strong>Distance:</strong> ${alternativeDistance.toFixed(1)} km</p>
+                            <p><strong>Travel Time:</strong> ${alternativeHours} hours and ${alternativeMinutes} minutes</p>`;
+                    } else {
+                        console.error("No alternative route found.");
+                    }
+                })
+                .catch(error => console.error("Error fetching alternative route:", error));
+        }
+
+        function initialize() {
+            initializeMap();
+            var sourceLat = parseFloat(prompt("Enter Source Latitude:", "15.333"));
+            var sourceLon = parseFloat(prompt("Enter Source Longitude:", "79.550"));
+            var destLat = parseFloat(prompt("Enter Destination Latitude:", "18.250000"));
+            var destLon = parseFloat(prompt("Enter Destination Longitude:", "81.950000"));
+
+            document.getElementById("sourceLat").textContent = sourceLat;
+            document.getElementById("sourceLon").textContent = sourceLon;
+            document.getElementById("destLat").textContent = destLat;
+            document.getElementById("destLon").textContent = destLon;
+
+            var timestamp = new Date();
+            document.getElementById("timestamp").textContent = timestamp.toLocaleString();
+
+            // Fetch weather data for source and destination locations
+            fetchWeatherData(sourceLat, sourceLon, destLat, destLon);
+
+            // Fetch route data
+            fetchRoute(sourceLat, sourceLon, destLat, destLon);
+        }
+
+        window.onload = initialize;
+    </script>
+</body>
+</html>
