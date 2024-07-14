@@ -1,2 +1,3 @@
 # Blazing_Trailblazers_Brigade
-Reroute Master...Dynamic Rerouting and 
+Reroute Master...
+Dynamic Rerouting and Disruption Management
